@@ -21,6 +21,7 @@ from megatron.core.extensions.transformer_engine import TENorm
 from megatron.core.fp8_utils import get_fp8_context
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.ssm.mamba_hybrid_layer_allocation import Symbols as LayerSymbols
 from megatron.core.ssm.mamba_hybrid_layer_allocation import allocate_layers
 from megatron.core.tensor_parallel import get_cuda_rng_tracker
@@ -258,6 +259,7 @@ class MambaStack(MegatronModule):
         attention_mask: Tensor,
         inference_context: Optional[BaseInferenceContext] = None,
         rotary_pos_emb: Optional[Tensor] = None,
+        packed_seq_params: Optional[PackedSeqParams] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
     ):
@@ -341,12 +343,14 @@ class MambaStack(MegatronModule):
                             inference_context=inference_context,
                             rotary_pos_emb=rotary_pos_emb,
                             sequence_len_offset=sequence_len_offset,
+                            packed_seq_params=packed_seq_params,
                         )
                     else:  # MambaLayer
                         hidden_states = layer(
                             hidden_states=hidden_states,
                             attention_mask=attention_mask,
                             inference_context=inference_context,
+                            packed_seq_params=packed_seq_params,
                         )
 
                 # The attention layer (currently a simplified transformer layer)

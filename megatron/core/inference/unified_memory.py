@@ -9,14 +9,16 @@ from torch.utils.cpp_extension import CUDA_HOME, load_inline
 
 from megatron.core.utils import is_torch_min_version
 
-try:
+"""try:
     if is_torch_min_version("2.8.0"):
         from torch.cuda.memory import MemPool
     else:
         from torch.cuda import MemPool
     _has_mem_pool = True
 except ImportError:
-    _has_mem_pool = False
+    _has_mem_pool = False"""
+
+_has_mem_pool = False
 
 _mempool_c_src = r"""
 #include <cuda_runtime_api.h>

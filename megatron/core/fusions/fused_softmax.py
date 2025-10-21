@@ -213,7 +213,7 @@ class FusedScaleMaskSoftmax(nn.Module):
         self.mask_func = mask_func
         self.softmax_in_fp32 = softmax_in_fp32
         self.scale = scale
-        self.window_size = window_size
+        self.window_size = tuple(window_size) if window_size else None
         assert self.scale is None or softmax_in_fp32, "softmax should be in fp32 when scaled"
 
     def forward(

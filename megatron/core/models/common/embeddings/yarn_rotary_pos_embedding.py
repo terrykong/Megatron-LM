@@ -58,9 +58,8 @@ def _yarn_rope_forward(
     )
     freqs = torch.outer(seq, inv_freq)
 
-    _mscale = float(
-        _yarn_get_mscale(scaling_factor, mscale)
-        / _yarn_get_mscale(scaling_factor, mscale_all_dim)
+    _mscale = _yarn_get_concentration_factor(
+        scaling_factor, mscale, mscale_all_dim
     )
 
     emb = torch.cat((freqs, freqs), dim=-1)

@@ -18,6 +18,7 @@ from megatron.core.dist_checkpointing import ShardedTensor
 from megatron.core.dist_checkpointing.mapping import ReplicaId, ShardedTensorFactory
 from megatron.core.fp8_utils import get_fp8_align_size
 from megatron.core.inference.contexts import BaseInferenceContext
+from megatron.core.jit import jit_fuser
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel import get_cuda_rng_tracker
@@ -26,6 +27,7 @@ from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.transformer.utils import (
+    ensure_metadata_has_dp_cp_group,
     make_sharded_tensors_for_checkpoint,
     sharded_state_dict_default,
 )
@@ -384,7 +386,7 @@ class GatedDeltaNet(MegatronModule):
 
         # RMSNorm
         nvtx_range_push(suffix="gated_norm")
-        norm_out = self._torch_compiled_gated_norm(core_attn_out, gate)
+        norm_out = self._apply_gated_norm(core_attn_out, gate)
         nvtx_range_pop(suffix="gated_norm")
 
         # Transpose: b s x --> s b x
@@ -399,8 +401,8 @@ class GatedDeltaNet(MegatronModule):
 
         return out, out_bias
 
-    @torch.compile
-    def _torch_compiled_gated_norm(self, x, gate):
+    @jit_fuser
+    def _apply_gated_norm(self, x, gate):
         # Output Norm
         x_dtype = x.dtype
         x = x.reshape(-1, x.shape[-1])
@@ -411,8 +413,11 @@ class GatedDeltaNet(MegatronModule):
         y = y.to(x_dtype)
         return y
 
-    def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
+    def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None, tp_group=None):
         """Provide a sharded state dictionary for distributed checkpointing."""
+        # Guard for cases metadata is not provided
+        metadata = ensure_metadata_has_dp_cp_group(metadata)
+
         sharded_state_dict = {}
         # Parameters
         self._save_to_state_dict(sharded_state_dict, "", keep_vars=True)
@@ -424,8 +429,11 @@ class GatedDeltaNet(MegatronModule):
                 "dt_bias": 0,
             },  # parameters sharded across TP
             sharded_offsets=sharded_offsets,
+            tp_group=(tp_group if tp_group is not None else self.pg_collection.tp),
+            dp_cp_group=metadata['dp_cp_group'],
         )
         # Submodules
+        tp_group = tp_group if tp_group is not None else self.pg_collection.tp
         for name, module in self.named_children():
             if name == "conv1d":
                 # Add TP sharding for Conv1d
@@ -434,11 +442,16 @@ class GatedDeltaNet(MegatronModule):
                 if self.conv_bias:
                     tp_sharding_map[f"bias"] = 0
                 module_sharded_sd = make_sharded_tensors_for_checkpoint(
-                    module_sd, f"{prefix}{name}.", tp_sharding_map, sharded_offsets
+                    module_sd,
+                    f"{prefix}{name}.",
+                    tp_sharding_map,
+                    sharded_offsets,
+                    tp_group=tp_group,
+                    dp_cp_group=metadata['dp_cp_group'],
                 )
             else:
                 module_sharded_sd = sharded_state_dict_default(
-                    module, f"{prefix}{name}.", sharded_offsets, metadata
+                    module, f"{prefix}{name}.", sharded_offsets, metadata, tp_group=tp_group
                 )
 
             sharded_state_dict.update(module_sharded_sd)

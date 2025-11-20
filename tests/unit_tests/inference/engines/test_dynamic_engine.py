@@ -346,6 +346,7 @@ class TestDynamicInferenceEngine:
                 fp8="hybrid" if test_config.fp8 else None,
                 fp8_recipe="tensorwise" if test_config.fp8 else None,
                 cuda_graph_scope=test_config.cuda_graph_scope,
+                is_hybrid_model=True,  # Needs to be set for correct out_proj init
             )
 
             # Mamba model.

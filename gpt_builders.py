@@ -8,6 +8,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_mtp_block_spec,
     get_gpt_decoder_layer_specs,
 )
+from megatron.core.models.mamba.mamba_layer_specs import get_mamba_mtp_block_spec
 from megatron.core.models.gpt.heterogeneous.heterogeneous_layer_specs import (
     get_gpt_heterogeneous_layer_spec,
 )
@@ -58,22 +59,30 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
                 transformer_layer_spec = _get_transformer_layer_spec(use_te, config)
         mtp_block_spec = None
         if args.mtp_num_layers is not None:
-            # Get GPT decoder layer specs for the model.
-            if args.spec is not None:
-                mtp_transformer_layer_spec = import_module(args.spec)
-            else:
-                # Define the decoder block spec
-                decoder_layer_specs = get_gpt_decoder_layer_specs(
-                    config, use_transformer_engine=use_te, normalization=args.normalization, qk_l2_norm=args.qk_l2_norm, vp_stage=vp_stage
+
+            if args.mtp_hybrid_override_pattern is not None:
+                # Uses the hybrid model for the MTP module.
+                mtp_mamba_stack_spec = import_module(args.mtp_spec)
+                mtp_block_spec = get_mamba_mtp_block_spec(
+                    config, mtp_mamba_stack_spec, use_transformer_engine=use_te, vp_stage=vp_stage
                 )
-                mtp_transformer_layer_spec = decoder_layer_specs[-1]
-            # Use spec of the last layer in decoder block as spec of the transformer layer in MTP
-            mtp_block_spec = get_gpt_mtp_block_spec(
-                config,
-                mtp_transformer_layer_spec,
-                use_transformer_engine=use_te,
-                vp_stage=vp_stage,
-            )
+            else:
+                assert not (config.transformer_impl == "inference_optimized")
+                if (
+                    hasattr(transformer_layer_spec, 'layer_specs')
+                    and len(transformer_layer_spec.layer_specs) == 0
+                ):
+                    # Get the decoder layer spec explicitly if no decoder layer in the last stage,
+                    # Only happens with block spec (TransformerBlockSubmodules) when using MoE.
+                    transformer_layer_spec_for_mtp = _get_transformer_layer_spec(use_te, config)
+                else:
+                    transformer_layer_spec_for_mtp = transformer_layer_spec
+                mtp_block_spec = get_gpt_mtp_block_spec(
+                    config,
+                    transformer_layer_spec_for_mtp,
+                    use_transformer_engine=use_te,
+                    vp_stage=vp_stage,
+                )
 
         model = GPTModel(
             config=config,
@@ -91,6 +100,7 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
             rope_scaling=args.use_rope_scaling,
             mtp_block_spec=mtp_block_spec,
             vp_stage=vp_stage,
+            mtp_hybrid_override_pattern=args.mtp_hybrid_override_pattern,
         )
 
     return model

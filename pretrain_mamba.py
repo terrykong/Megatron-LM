@@ -221,13 +221,8 @@ def forward_step(data_iterator, model: MambaModel):
     timers('batch-generator').stop()
 
     with stimer:
-        output_tensor = model(
-            tokens,
-            position_ids,
-            attention_mask,
-            labels=labels,
-            packed_seq_params=packed_seq_params,
-        )
+        output_tensor = model(tokens, position_ids, attention_mask,
+                              labels=labels, packed_seq_params=packed_seq_params, loss_mask=loss_mask)
 
     # [ModelOpt]: model is needed to access ModelOpt distillation losses
     return output_tensor, partial(loss_func, loss_mask, model=model)
@@ -264,11 +259,8 @@ def core_gpt_dataset_config_from_args(args):
         create_attention_mask=args.create_attention_mask_in_dataloader,
         object_storage_cache_path=args.object_storage_cache_path,
         mid_level_dataset_surplus=args.mid_level_dataset_surplus,
-<<<<<<< HEAD
         allow_ambiguous_pad_tokens=args.allow_ambiguous_pad_tokens,
-=======
         context_parallel_size=args.context_parallel_size,
->>>>>>> 97f6604a09 (Add sequence packing support for hybrid model)
     )
 
 

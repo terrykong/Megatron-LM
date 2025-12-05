@@ -223,6 +223,14 @@ class MoELayer(BaseMoELayer):
         dispatcher. The original hidden states are returned as a residual connection.
         """
         residual = hidden_states
+
+        # Project the hidden_states from hidden dimension down to latent dimenion.
+        if self.config.moe_latent_size:
+            assert (
+                not self.shared_expert_overlap
+            ), "Shared expert overlap not supported when MoE latent projections are used."
+            hidden_states, _ = self.fc1_latent_proj(hidden_states)
+
         hidden_states, probs = self.token_dispatcher.dispatch_preprocess(
             hidden_states, routing_map, probs
         )
@@ -323,15 +331,24 @@ class MoELayer(BaseMoELayer):
 
         # MoE forward: route -> dispatch -> compute -> combine
         def custom_forward(hidden_states):
-            shared_expert_output = self.shared_experts_compute(hidden_states)
-            hidden_states, probs, residual = self.router_and_preprocess(hidden_states)
+            try:
+                shared_expert_output = self.shared_experts_compute(hidden_states)
+                probs, routing_map = self.route(hidden_states)
+                hidden_states, probs, residual = self.preprocess(hidden_states, probs, routing_map)
+            except MoECudaGraphPartialCaptureSignal as e:
+                # This signal is raised from the maybe_skip_or_early_return_by_cudagraph decorator.
+                # It means we should early-return from the MoE layer forward pass.
+                # This happens when we are partially capturing the CUDA graph of the MoE layer,
+                # like cuda_graph_scope=["moe_router", "moe_preprocess"].
+                # We need to return the intermediate tensors as CUDA graph outputs.
+                return e.get_early_return_outputs(hidden_states, shared_expert_output)
 
-            # Project the hidden_states from hidden dimension down to latent dimenion.
-            if self.config.moe_latent_size:
-                assert (
-                    not self.shared_expert_overlap
-                ), "Shared expert overlap not supported when MoE latent projections are used."
-                hidden_states, _ = self.fc1_latent_proj(hidden_states)
+            # # Project the hidden_states from hidden dimension down to latent dimenion.
+            # if self.config.moe_latent_size:
+            #     assert (
+            #         not self.shared_expert_overlap
+            #     ), "Shared expert overlap not supported when MoE latent projections are used."
+            #     hidden_states, _ = self.fc1_latent_proj(hidden_states)
 
             dispatched_input, probs = self.dispatch(hidden_states, probs)
             output, mlp_bias = self.routed_experts_compute(dispatched_input, probs, residual)

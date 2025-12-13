@@ -406,6 +406,7 @@ class DynamicInferenceContext(BaseInferenceContext):
             self.max_tokens = self.round_up_tokens(max_tokens_override, tp_size=tp_size)
 
         self.max_requests = min(self.max_requests, self.max_tokens)  # e.g., decode only.
+        self.max_total_requests = self.max_requests
 
         # Initialize context state.
         self.params_dtype = params_dtype
